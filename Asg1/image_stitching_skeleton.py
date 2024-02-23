@@ -90,8 +90,50 @@ def find_homography_ransac(list_pairs_matched_keypoints,
 
     # to be completed ...
 
-    return best_H
+    pts_src = np.float32([kp_pair[0] for kp_pair in list_pairs_matched_keypoints])
+    pts_dst = np.float32([kp_pair[1] for kp_pair in list_pairs_matched_keypoints])
 
+    best_H, status = cv2.findHomography(pts_src, pts_dst, cv2.RANSAC,
+                                    ransacReprojThreshold=threshold_reprojection_error,
+                                    maxIters=max_num_trial,
+                                    confidence=threshold_ratio_inliers)
+    
+    # max_inliers = 0
+    # for _ in range(max_num_trial):
+    #     # Randomly sample 4 pairs of points
+    #     samples = np.random.choice(len(list_pairs_matched_keypoints), 4, replace=False)
+    #     pts_src = np.float32([list_pairs_matched_keypoints[i][0] for i in samples])
+    #     pts_dst = np.float32([list_pairs_matched_keypoints[i][1] for i in samples])
+        
+    #     # Compute homography using the sampled points
+    #     H, _ = cv2.findHomography(pts_src, pts_dst, method=0)  # method=0 means using all points exactly (no RANSAC)
+        
+    #     # Compute inliers
+    #     inliers_count = 0
+    #     for pair in list_pairs_matched_keypoints:
+    #         pt_src = np.array(pair[0] + [1], dtype='float32')
+    #         pt_dst = np.array(pair[1] + [1], dtype='float32')
+            
+    #         projected_pt_src = np.dot(H, pt_src)
+    #         projected_pt_src /= projected_pt_src[2]  # normalize
+            
+    #         # Compute Euclidean distance
+    #         distance = np.linalg.norm(projected_pt_src[:2] - pt_dst[:2])
+    #         if distance < threshold_reprojection_error:
+    #             inliers_count += 1
+        
+    #     # Update the best homography if the current one has more inliers
+    #     if inliers_count > max_inliers:
+    #         max_inliers = inliers_count
+    #         best_H = H
+    
+    # # Accept or reject the homography based on the number of inliers
+    # if max_inliers / len(list_pairs_matched_keypoints) > threshold_ratio_inliers:
+    #     return best_H
+    # else:
+    #     return None
+
+    return best_H
 
 def warp_blend_image(img_1, H, img_2):
     """
@@ -108,6 +150,29 @@ def warp_blend_image(img_1, H, img_2):
 
     # to be completed ...
 
+    # Find the inverse of the homography
+    H_inv = np.linalg.inv(H)
+
+    # # Get the dimensions of both images
+    height_img_1, width_img_1 = img_1.shape[:2]
+    height_img_2, width_img_2 = img_2.shape[:2]
+
+    height = img_1.shape[0]+img_2.shape[0] #if want to clip, delete img_2.shape[0]
+    width = img_1.shape[1] +img_2.shape[1]
+
+    # Warp the second image with the inverse homography
+    dst = cv2.warpPerspective(img_2, H_inv, (width, height), cv2.WARP_INVERSE_MAP)
+
+    for i in range(img_2.shape[0]):
+        for j in range(img_2.shape[1]):
+            if np.array_equal(dst[i,j],[0,0,0]):
+                dst[i,j] = img_1[i,j]
+            else:
+                dst[i,j][0] = (int(dst[i,j][0]) + int(img_1[i,j][0]))//2  #r
+                dst[i,j][1] = (int(dst[i,j][1]) + int(img_1[i,j][1]))//2  #g
+                dst[i,j][2] = (int(dst[i,j][2]) + int(img_1[i,j][2]))//2  #b
+
+    img_panorama = dst
     return img_panorama
 
 
@@ -152,10 +217,10 @@ if __name__ == "__main__":
     img_1 = cv2.imread(args.im1)
     img_2 = cv2.imread(args.im2)
 
-    list_pairs_matched_keypoints = extract_and_match_feature(img_1=img_1, img_2=img_2, ratio_test=0.7)
+    # list_pairs_matched_keypoints = extract_and_match_feature(img_1=img_1, img_2=img_2, ratio_test=0.7)
 
-    # # ===== create a panorama image
-    # img_panorama = stitch_images(img_1=img_1, img_2=img_2)
+    # ===== create a panorama image
+    img_panorama = stitch_images(img_1=img_1, img_2=img_2)
 
-    # # ===== save panorama image
-    # cv2.imwrite(filename=args.output, img=img_panorama.clip(0.0, 255.0).astype(np.uint8))
+    # ===== save panorama image
+    cv2.imwrite(filename=args.output, img=img_panorama.clip(0.0, 255.0).astype(np.uint8))
