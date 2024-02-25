@@ -98,42 +98,51 @@ def find_homography_ransac(list_pairs_matched_keypoints,
                                     maxIters=max_num_trial,
                                     confidence=threshold_ratio_inliers)
     
-    # max_inliers = 0
-    # for _ in range(max_num_trial):
-    #     # Randomly sample 4 pairs of points
-    #     samples = np.random.choice(len(list_pairs_matched_keypoints), 4, replace=False)
-    #     pts_src = np.float32([list_pairs_matched_keypoints[i][0] for i in samples])
-    #     pts_dst = np.float32([list_pairs_matched_keypoints[i][1] for i in samples])
-        
-    #     # Compute homography using the sampled points
-    #     H, _ = cv2.findHomography(pts_src, pts_dst, method=0)  # method=0 means using all points exactly (no RANSAC)
-        
-    #     # Compute inliers
-    #     inliers_count = 0
-    #     for pair in list_pairs_matched_keypoints:
-    #         pt_src = np.array(pair[0] + [1], dtype='float32')
-    #         pt_dst = np.array(pair[1] + [1], dtype='float32')
-            
-    #         projected_pt_src = np.dot(H, pt_src)
-    #         projected_pt_src /= projected_pt_src[2]  # normalize
-            
-    #         # Compute Euclidean distance
-    #         distance = np.linalg.norm(projected_pt_src[:2] - pt_dst[:2])
-    #         if distance < threshold_reprojection_error:
-    #             inliers_count += 1
-        
-    #     # Update the best homography if the current one has more inliers
-    #     if inliers_count > max_inliers:
-    #         max_inliers = inliers_count
-    #         best_H = H
-    
-    # # Accept or reject the homography based on the number of inliers
-    # if max_inliers / len(list_pairs_matched_keypoints) > threshold_ratio_inliers:
-    #     return best_H
-    # else:
-    #     return None
-
     return best_H
+
+def pyramid_blending(img1, img2, num_levels=6):
+    # generate Gaussian pyramid for img1
+    G = img1.copy()
+    gp1 = [G]
+    for i in range(num_levels):
+        G = cv2.pyrDown(G)
+        gp1.append(G)
+
+    # generate Gaussian pyramid for img2
+    G = img2.copy()
+    gp2 = [G]
+    for i in range(num_levels):
+        G = cv2.pyrDown(G)
+        gp2.append(G)
+
+    # generate Laplacian Pyramid for img1
+    lp1 = [gp1[num_levels]]
+    for i in range(num_levels, 0, -1):
+        GE = cv2.pyrUp(gp1[i])
+        L = cv2.subtract(gp1[i-1], GE)
+        lp1.append(L)
+
+    # generate Laplacian Pyramid for img2
+    lp2 = [gp2[num_levels]]
+    for i in range(num_levels, 0, -1):
+        GE = cv2.pyrUp(gp2[i])
+        L = cv2.subtract(gp2[i-1], GE)
+        lp2.append(L)
+
+    # Now add left and right halves of images in each level
+    LS = []
+    for la, lb in zip(lp1, lp2):
+        rows, cols, dpt = la.shape
+        ls = np.hstack((la[:, :cols//2], lb[:, cols//2:]))
+        LS.append(ls)
+
+    # now reconstruct
+    img_panorama = LS[0]
+    for i in range(1, num_levels):
+        img_panorama = cv2.pyrUp(img_panorama)
+        img_panorama = cv2.add(img_panorama, LS[i])
+
+    return img_panorama
 
 def warp_blend_image(img_1, H, img_2):
     """
@@ -148,8 +157,6 @@ def warp_blend_image(img_1, H, img_2):
     """
     img_panorama = None
 
-    # to be completed ...
-
     # Find the inverse of the homography
     H_inv = np.linalg.inv(H)
 
@@ -161,7 +168,7 @@ def warp_blend_image(img_1, H, img_2):
     width = img_1.shape[1] +img_2.shape[1]
 
     # Warp the second image with the inverse homography
-    dst = cv2.warpPerspective(img_2, H_inv, (width, height), cv2.WARP_INVERSE_MAP)
+    dst = cv2.warpPerspective(img_2, H_inv, (width, height))
 
     for i in range(img_2.shape[0]):
         for j in range(img_2.shape[1]):
@@ -174,7 +181,6 @@ def warp_blend_image(img_1, H, img_2):
 
     img_panorama = dst
     return img_panorama
-
 
 def stitch_images(img_1, img_2):
     """
