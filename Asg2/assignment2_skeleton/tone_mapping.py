@@ -13,6 +13,7 @@
 # Email Addr :
 #
 
+from numba import jit
 import cv2
 import numpy as np
 import os
@@ -108,6 +109,12 @@ def he_tonemap(input: np.ndarray) -> np.ndarray:
     return output
 
 
+@jit(nopython=True)
+def gaussian(x, sigma):
+    """Gaussian function."""
+    return np.exp(-(x ** 2) / (2 * (sigma ** 2)))
+
+
 def bilateral_filter(input: np.ndarray, size: int, sigma_space: float, sigma_range: float) -> np.ndarray:
     """ local tone mapping with durand's operator (bilateral filtering)
 
@@ -120,8 +127,40 @@ def bilateral_filter(input: np.ndarray, size: int, sigma_space: float, sigma_ran
     # write you code here
     # to be completed
     # If d is non-positive, it is computed from 'sigmaSpace'
+    '''
     output = cv2.bilateralFilter(input, d=-1, sigmaColor=sigma_range, sigmaSpace=sigma_space)
     # write you code here
+    return output
+    '''
+    # Radius of the filter window
+    r = size // 2
+    # Padding for handle edge pixels
+    padded_input = np.pad(input, r, mode='reflect')
+
+    # Pre-compute spatial kernel outside the loop since spatial relationship remain unchange for every pixel
+    x, y = np.mgrid[-r:r+1, -r:r+1]
+    kernel_space = gaussian(np.sqrt(x**2 + y**2), sigma_space)
+    
+    output = np.zeros_like(input)
+    for i in range(input.shape[0]):
+        for j in range(input.shape[1]):
+            # Extract current pxiel filter window
+            window = padded_input[i:i+size, j:j+size]
+            
+            # Calculate range kernel for each pixel in the window
+            intensity_diff = window - padded_input[i + r, j + r]
+            kernel_range = gaussian(intensity_diff, sigma_range)
+            
+            # Calculate combined bilateral filter kernel
+            kernel_bilateral = kernel_space * kernel_range
+            # Apply kernel to the window, sum the weighted intensity
+            weighted_sum = np.sum(kernel_bilateral * window)
+            # Sum the weight for norm
+            weights = np.sum(kernel_bilateral)
+
+            # Normalize and set output pixel value
+            output[i, j] = weighted_sum / weights if weights > 0 else input[i, j]
+    
     return output
 
 
